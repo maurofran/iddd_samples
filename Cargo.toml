@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "common",
-    "identityaccess"
+    "iddd_common",
+    "iddd_identityaccess"
 ]
