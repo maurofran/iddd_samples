@@ -29,7 +29,7 @@ impl TenantId {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     #[test]
     pub fn test_new_empty_value() {

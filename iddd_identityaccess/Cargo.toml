@@ -12,3 +12,7 @@ path = "../iddd_common"
 [dependencies.uuid]
 version = "1.4.1"
 features = ["v4"]
+
+[dependencies.chrono]
+version = "0.4.31"
+features = ["serde"]
