@@ -99,6 +99,16 @@ macro_rules! assert_argument_true {
     }}
 }
 
+#[macro_export]
+macro_rules! assert_true {
+    ($actual:expr, $($arg:tt)*) => {{
+        if !$actual {
+            return arg_error!($($arg)*);
+        }
+        Ok(())
+    }}
+}
+
 
 #[derive(Debug)]
 pub struct StateError(pub String);

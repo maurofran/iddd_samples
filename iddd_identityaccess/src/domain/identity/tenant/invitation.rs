@@ -1,27 +1,27 @@
 use std::fmt;
 use std::fmt::Formatter;
-use std::ops::{Bound, RangeBounds, RangeFull};
 
 use chrono::prelude::*;
 
-use iddd_common::{arg_error, assert_argument_length, assert_argument_not_empty};
+use iddd_common::{arg_error, assert_argument_length, assert_argument_not_empty, assert_true};
 use iddd_common::assertion::ArgumentError;
 
 /// Invitation structure.
 #[derive(Debug)]
-pub struct Invitation<B> where B: RangeBounds<DateTime<Utc>> {
+pub struct Invitation {
     invitation_id: String,
     description: String,
-    validity: B,
+    starting_on: Option<DateTime<Utc>>,
+    until: Option<DateTime<Utc>>,
 }
 
-impl Invitation<RangeFull> {
+impl Invitation {
     /// Creates a new [Invitation].
     ///
     /// #Arguments
     /// * `invitation_id` - The invitation unique identifier.
     /// * `description` - The invitation description.
-    pub fn new(invitation_id: &str, description: &str) -> Result<Invitation<RangeFull>, ArgumentError> {
+    pub fn new(invitation_id: &str, description: &str) -> Result<Invitation, ArgumentError> {
         assert_argument_not_empty!(invitation_id, "invitation_id")?;
         assert_argument_length!(invitation_id, 1, 36, "invitation_id")?;
         assert_argument_not_empty!(description, "description")?;
@@ -29,15 +29,21 @@ impl Invitation<RangeFull> {
         Ok(Invitation {
             invitation_id: invitation_id.to_string(),
             description: description.to_string(),
-            validity: RangeFull,
+            starting_on: None,
+            until: None,
         })
     }
-}
 
-impl<B> Invitation<B> where B: RangeBounds<DateTime<Utc>> {
     /// Check if the [Invitation] is actually available.
     pub fn is_available(&self) -> bool {
-        self.validity.contains(&Utc::now())
+        let now = Utc::now();
+        return match self.starting_on {
+            None => true,
+            Some(start) => now >= start,
+        } && match self.until {
+            None => true,
+            Some(end) => now <= end,
+        };
     }
 
     /// Check if the [Invitation] is identified by the given identifier.
@@ -49,28 +55,25 @@ impl<B> Invitation<B> where B: RangeBounds<DateTime<Utc>> {
     }
 
     /// Redefine the [Invitation] as open-ended.
-    pub fn redefine_as_open_ended(self) -> Invitation<RangeFull> {
-        Invitation {
-            invitation_id: self.invitation_id,
-            description: self.description,
-            validity: RangeFull,
-        }
+    pub fn redefine_as_open_ended(&mut self) {
+        self.starting_on = None;
+        self.until = None;
     }
 
     /// Redefine the [Invitation] with supplied validity range.
     ///
     /// # Arguments:
-    /// * `validity` - The validity range of the [Invitation].
-    pub fn redefine_as<R>(self, validity: R) -> Invitation<R> where R: RangeBounds<DateTime<Utc>> {
-        Invitation {
-            invitation_id: self.invitation_id,
-            description: self.description,
-            validity,
-        }
+    /// * `starting_on` - The start of invitation validity.
+    /// * `until` - The end of invitation validity.
+    pub fn redefine_as(&mut self, starting_on: DateTime<Utc>, until: DateTime<Utc>) -> Result<(), ArgumentError> {
+        assert_true!(starting_on <= until, "starting_on must occurs before until")?;
+        self.starting_on = Some(starting_on);
+        self.until = Some(until);
+        Ok(())
     }
 }
 
-impl<B> InvitationDescriptor for Invitation<B> where B: RangeBounds<DateTime<Utc>> {
+impl InvitationDescriptor for Invitation {
     fn invitation_id(&self) -> &str {
         &self.invitation_id
     }
@@ -79,16 +82,16 @@ impl<B> InvitationDescriptor for Invitation<B> where B: RangeBounds<DateTime<Utc
         &self.description
     }
 
-    fn starting_on(&self) -> Bound<&DateTime<Utc>> {
-        self.validity.start_bound()
+    fn starting_on(&self) -> Option<DateTime<Utc>> {
+        self.starting_on
     }
 
-    fn until(&self) -> Bound<&DateTime<Utc>> {
-        self.validity.end_bound()
+    fn until(&self) -> Option<DateTime<Utc>> {
+        self.until
     }
 }
 
-impl<B> fmt::Display for Invitation<B> where B: RangeBounds<DateTime<Utc>> {
+impl fmt::Display for Invitation {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "Invitation [invitation_id = {}, description = {}, starting_on = {:?}, until = {:?}]",
                self.invitation_id(), self.description(), self.starting_on(), self.until())
@@ -98,15 +101,15 @@ impl<B> fmt::Display for Invitation<B> where B: RangeBounds<DateTime<Utc>> {
 pub trait InvitationDescriptor {
     fn invitation_id(&self) -> &str;
     fn description(&self) -> &str;
-    fn starting_on(&self) -> Bound<&DateTime<Utc>>;
+    fn starting_on(&self) -> Option<DateTime<Utc>>;
 
-    fn until(&self) -> Bound<&DateTime<Utc>>;
+    fn until(&self) -> Option<DateTime<Utc>>;
 }
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Bound::Unbounded;
     use chrono::Duration;
+
     use super::*;
 
     #[test]
@@ -144,8 +147,8 @@ mod tests {
         let invitation = actual.unwrap();
         assert_eq!(invitation.invitation_id(), "anInvitationId");
         assert_eq!(invitation.description(), "aDescription");
-        assert_eq!(invitation.starting_on(), Unbounded);
-        assert_eq!(invitation.until(), Unbounded);
+        assert_eq!(invitation.starting_on(), None);
+        assert_eq!(invitation.until(), None);
     }
 
     #[test]
@@ -157,16 +160,18 @@ mod tests {
     #[test]
     pub fn test_invitation_is_available_with_validity_in_past() {
         let past = Utc::now() - Duration::days(1);
-        let actual = Invitation::new("anInvitationId", "aDescription")
-            .unwrap().redefine_as(..past);
+        let mut actual = Invitation::new("anInvitationId", "aDescription")
+            .unwrap();
+        let _ = actual.redefine_as(DateTime::<Utc>::MIN_UTC, past);
         assert_eq!(false, actual.is_available());
     }
 
     #[test]
     pub fn test_invitation_is_available_with_validity_in_future() {
         let future = Utc::now() + Duration::days(1);
-        let actual = Invitation::new("anInvitationId", "aDescription")
-           .unwrap().redefine_as(future..);
+        let mut actual = Invitation::new("anInvitationId", "aDescription")
+            .unwrap();
+        let _ = actual.redefine_as(future, DateTime::<Utc>::MAX_UTC);
         assert_eq!(false, actual.is_available());
     }
 
@@ -174,8 +179,9 @@ mod tests {
     pub fn test_invitation_is_available_with_validity() {
         let past = Utc::now() - Duration::days(1);
         let future = Utc::now() + Duration::days(1);
-        let actual = Invitation::new("anInvitationId", "aDescription")
-          .unwrap().redefine_as(past..future);
+        let mut actual = Invitation::new("anInvitationId", "aDescription")
+            .unwrap();
+        let _ = actual.redefine_as(past, future);
         assert_eq!(true, actual.is_available());
     }
 
@@ -184,6 +190,7 @@ mod tests {
         let invitation = Invitation::new("anInvitationId", "aDescription").unwrap();
         assert_eq!(true, invitation.is_identified_by("anInvitationId"));
     }
+
     #[test]
     pub fn test_invitation_is_identified_by_description() {
         let invitation = Invitation::new("anInvitationId", "aDescription").unwrap();
@@ -194,5 +201,23 @@ mod tests {
     pub fn test_invitation_is_identified_not_identified() {
         let invitation = Invitation::new("anInvitationId", "aDescription").unwrap();
         assert_eq!(false, invitation.is_identified_by("missing"));
+    }
+
+    #[test]
+    pub fn test_invitation_redefine_as_open_ended() {
+        let mut invitation = Invitation::new("anInvitationId", "aDescription").unwrap();
+        let _ = invitation.redefine_as(DateTime::<Utc>::MIN_UTC, DateTime::<Utc>::MAX_UTC);
+        invitation.redefine_as_open_ended();
+        assert_eq!(None, invitation.starting_on());
+        assert_eq!(None, invitation.until());
+    }
+
+    #[test]
+    pub fn test_invitation_redefine_as_invalid_end() {
+        let mut invitation = Invitation::new("anInvitationId", "aDescription").unwrap();
+
+        let res = invitation.redefine_as(DateTime::<Utc>::MAX_UTC, DateTime::<Utc>::MIN_UTC);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().to_string(), "starting_on must occurs before until")
     }
 }

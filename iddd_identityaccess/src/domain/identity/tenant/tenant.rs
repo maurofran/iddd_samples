@@ -1,12 +1,13 @@
 use iddd_common::{arg_error, assert_argument_length, assert_argument_not_empty};
 use iddd_common::assertion::ArgumentError;
-use crate::domain::identity::tenant::TenantId;
+use crate::domain::identity::tenant::{Invitation, TenantId};
 
 pub struct Tenant {
     tenant_id: TenantId,
     name: String,
     description: Option<String>,
     active: bool,
+    invitations: Vec<Invitation>,
 }
 
 impl Tenant {
@@ -22,6 +23,7 @@ impl Tenant {
             name: name.to_string(),
             description: description.map(|s| s.to_string()),
             active,
+            invitations: Vec::new(),
         })
     }
 }
